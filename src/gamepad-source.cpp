@@ -6,6 +6,7 @@
 #include <graphics/graphics.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstring>
 #include <mutex>
@@ -33,8 +34,26 @@ struct GamepadSource {
 	uint32_t last_w = 0;
 	uint32_t last_h = 0;
 	bool have_last = false;
+	StickTrail ls_trail;
+	StickTrail rs_trail;
 	std::mutex mutex;
 };
+
+int clamp_i(int v, int lo, int hi)
+{
+	return std::clamp(v, lo, hi);
+}
+
+int get_pos(obs_data_t *settings, const char *key)
+{
+	return clamp_i((int)obs_data_get_int(settings, key), -50, 50);
+}
+
+uint64_t now_ms()
+{
+	using clock = std::chrono::steady_clock;
+	return (uint64_t)std::chrono::duration_cast<std::chrono::milliseconds>(clock::now().time_since_epoch()).count();
+}
 
 void push_needs(const GamepadDrawSettings &d)
 {
@@ -110,7 +129,40 @@ void source_update(void *data, obs_data_t *settings)
 	ctx->draw.show_deadzone_bars = obs_data_get_bool(settings, "show_deadzone_bars");
 	ctx->draw.show_anti_deadzone_bars = obs_data_get_bool(settings, "show_anti_deadzone_bars");
 	ctx->draw.show_jitter_bars = obs_data_get_bool(settings, "show_jitter_bars");
+	ctx->draw.show_trails = obs_data_get_bool(settings, "show_trails");
+	ctx->draw.trail_len = clamp_i((int)obs_data_get_int(settings, "trail_len"), 8, StickTrail::kMax);
+	ctx->draw.trail_life = (float)std::clamp(obs_data_get_double(settings, "trail_life"), 0.4, 6.0);
+	ctx->draw.trail_thick = (float)clamp_i((int)obs_data_get_int(settings, "trail_thick"), 50, 200) / 100.0f;
 	ctx->draw.deadzone = (float)obs_data_get_double(settings, "deadzone");
+	ctx->draw.col_ls = (uint32_t)obs_data_get_int(settings, "col_ls");
+	ctx->draw.col_rs = (uint32_t)obs_data_get_int(settings, "col_rs");
+	ctx->draw.col_a = (uint32_t)obs_data_get_int(settings, "col_a");
+	ctx->draw.col_b = (uint32_t)obs_data_get_int(settings, "col_b");
+	ctx->draw.col_x = (uint32_t)obs_data_get_int(settings, "col_x");
+	ctx->draw.col_y = (uint32_t)obs_data_get_int(settings, "col_y");
+	ctx->draw.col_dpad = (uint32_t)obs_data_get_int(settings, "col_dpad");
+	ctx->draw.pos_ls_x = get_pos(settings, "pos_ls_x");
+	ctx->draw.pos_ls_y = get_pos(settings, "pos_ls_y");
+	ctx->draw.pos_rs_x = get_pos(settings, "pos_rs_x");
+	ctx->draw.pos_rs_y = get_pos(settings, "pos_rs_y");
+	ctx->draw.pos_face_x = get_pos(settings, "pos_face_x");
+	ctx->draw.pos_face_y = get_pos(settings, "pos_face_y");
+	ctx->draw.pos_dpad_x = get_pos(settings, "pos_dpad_x");
+	ctx->draw.pos_dpad_y = get_pos(settings, "pos_dpad_y");
+	ctx->draw.pos_gyro_x = get_pos(settings, "pos_gyro_x");
+	ctx->draw.pos_gyro_y = get_pos(settings, "pos_gyro_y");
+	ctx->draw.pos_trig_x = get_pos(settings, "pos_trig_x");
+	ctx->draw.pos_trig_y = get_pos(settings, "pos_trig_y");
+	ctx->draw.pos_menu_x = get_pos(settings, "pos_menu_x");
+	ctx->draw.pos_menu_y = get_pos(settings, "pos_menu_y");
+	ctx->draw.pos_bump_x = get_pos(settings, "pos_bump_x");
+	ctx->draw.pos_bump_y = get_pos(settings, "pos_bump_y");
+	ctx->draw.pos_bars_x = get_pos(settings, "pos_bars_x");
+	ctx->draw.pos_bars_y = get_pos(settings, "pos_bars_y");
+	if (!ctx->draw.show_trails || !ctx->draw.show_left_stick)
+		ctx->ls_trail.clear();
+	if (!ctx->draw.show_trails || !ctx->draw.show_right_stick)
+		ctx->rs_trail.clear();
 	ctx->rumble_left = (int)obs_data_get_int(settings, "rumble_left");
 	ctx->rumble_right = (int)obs_data_get_int(settings, "rumble_right");
 	ctx->rumble_ms = (int)obs_data_get_int(settings, "rumble_ms");
@@ -139,7 +191,36 @@ void source_defaults(obs_data_t *settings)
 	obs_data_set_default_bool(settings, "show_deadzone_bars", true);
 	obs_data_set_default_bool(settings, "show_anti_deadzone_bars", true);
 	obs_data_set_default_bool(settings, "show_jitter_bars", true);
+	obs_data_set_default_bool(settings, "show_trails", true);
+	obs_data_set_default_int(settings, "trail_len", 28);
+	obs_data_set_default_double(settings, "trail_life", 2.2);
+	obs_data_set_default_int(settings, "trail_thick", 100);
 	obs_data_set_default_double(settings, "deadzone", 0.0);
+	obs_data_set_default_int(settings, "col_ls", 0x00FFDC3D);
+	obs_data_set_default_int(settings, "col_rs", 0x00D56AFF);
+	obs_data_set_default_int(settings, "col_a", 0x003FBB7C);
+	obs_data_set_default_int(settings, "col_b", 0x003F3CE0);
+	obs_data_set_default_int(settings, "col_x", 0x00DB8C3B);
+	obs_data_set_default_int(settings, "col_y", 0x0047C5E8);
+	obs_data_set_default_int(settings, "col_dpad", 0x0066D1FF);
+	obs_data_set_default_int(settings, "pos_ls_x", 0);
+	obs_data_set_default_int(settings, "pos_ls_y", 0);
+	obs_data_set_default_int(settings, "pos_rs_x", 0);
+	obs_data_set_default_int(settings, "pos_rs_y", 0);
+	obs_data_set_default_int(settings, "pos_face_x", 0);
+	obs_data_set_default_int(settings, "pos_face_y", 0);
+	obs_data_set_default_int(settings, "pos_dpad_x", 0);
+	obs_data_set_default_int(settings, "pos_dpad_y", 0);
+	obs_data_set_default_int(settings, "pos_gyro_x", 0);
+	obs_data_set_default_int(settings, "pos_gyro_y", 0);
+	obs_data_set_default_int(settings, "pos_trig_x", 0);
+	obs_data_set_default_int(settings, "pos_trig_y", 0);
+	obs_data_set_default_int(settings, "pos_menu_x", 0);
+	obs_data_set_default_int(settings, "pos_menu_y", 0);
+	obs_data_set_default_int(settings, "pos_bump_x", 0);
+	obs_data_set_default_int(settings, "pos_bump_y", 0);
+	obs_data_set_default_int(settings, "pos_bars_x", 0);
+	obs_data_set_default_int(settings, "pos_bars_y", 0);
 	obs_data_set_default_int(settings, "rumble_left", 80);
 	obs_data_set_default_int(settings, "rumble_right", 80);
 	obs_data_set_default_int(settings, "rumble_ms", 400);
@@ -160,6 +241,26 @@ bool rumble_clicked(obs_properties_t *, obs_property_t *, void *data)
 	const uint16_t right = (uint16_t)std::clamp(right_pct * 65535 / 100, 0, 65535);
 	gamepad_runtime_rumble(slot, left, right, (uint32_t)std::max(duration, 50));
 	return false;
+}
+
+bool reset_layout_clicked(obs_properties_t *, obs_property_t *, void *data)
+{
+	auto *ctx = static_cast<GamepadSource *>(data);
+	obs_data_t *s = obs_source_get_settings(ctx->source);
+	static const char *keys[] = {"pos_ls_x",   "pos_ls_y",   "pos_rs_x",   "pos_rs_y",   "pos_face_x", "pos_face_y",
+				     "pos_dpad_x", "pos_dpad_y", "pos_gyro_x", "pos_gyro_y", "pos_trig_x", "pos_trig_y",
+				     "pos_menu_x", "pos_menu_y", "pos_bump_x", "pos_bump_y", "pos_bars_x", "pos_bars_y"};
+	for (const char *key : keys)
+		obs_data_set_int(s, key, 0);
+	obs_source_update(ctx->source, s);
+	obs_data_release(s);
+	return true;
+}
+
+void add_xy(obs_properties_t *p, const char *xk, const char *yk, const char *xl, const char *yl)
+{
+	obs_properties_add_int_slider(p, xk, obs_module_text(xl), -50, 50, 1);
+	obs_properties_add_int_slider(p, yk, obs_module_text(yl), -50, 50, 1);
 }
 
 obs_properties_t *source_properties(void *)
@@ -184,6 +285,10 @@ obs_properties_t *source_properties(void *)
 	obs_properties_add_bool(sticks, "show_left_stick_numbers", obs_module_text("ShowLeftStickNumbers"));
 	obs_properties_add_bool(sticks, "show_right_stick", obs_module_text("ShowRightStick"));
 	obs_properties_add_bool(sticks, "show_right_stick_numbers", obs_module_text("ShowRightStickNumbers"));
+	obs_properties_add_bool(sticks, "show_trails", obs_module_text("ShowTrails"));
+	obs_properties_add_int_slider(sticks, "trail_len", obs_module_text("TrailLen"), 8, StickTrail::kMax, 1);
+	obs_properties_add_float_slider(sticks, "trail_life", obs_module_text("TrailLife"), 0.4, 6.0, 0.1);
+	obs_properties_add_int_slider(sticks, "trail_thick", obs_module_text("TrailThick"), 50, 200, 5);
 	obs_properties_add_group(props, "sticks_group", obs_module_text("SticksGroup"), OBS_GROUP_NORMAL, sticks);
 
 	obs_properties_t *buttons = obs_properties_create();
@@ -209,6 +314,29 @@ obs_properties_t *source_properties(void *)
 	obs_properties_add_bool(tune, "show_jitter_bars", obs_module_text("ShowJitterBars"));
 	obs_properties_add_group(props, "tune_group", obs_module_text("TuneGroup"), OBS_GROUP_NORMAL, tune);
 
+	obs_properties_t *colors = obs_properties_create();
+	obs_properties_add_color(colors, "col_ls", obs_module_text("ColLs"));
+	obs_properties_add_color(colors, "col_rs", obs_module_text("ColRs"));
+	obs_properties_add_color(colors, "col_a", obs_module_text("ColA"));
+	obs_properties_add_color(colors, "col_b", obs_module_text("ColB"));
+	obs_properties_add_color(colors, "col_x", obs_module_text("ColX"));
+	obs_properties_add_color(colors, "col_y", obs_module_text("ColY"));
+	obs_properties_add_color(colors, "col_dpad", obs_module_text("ColDpad"));
+	obs_properties_add_group(props, "colors_group", obs_module_text("ColorsGroup"), OBS_GROUP_NORMAL, colors);
+
+	obs_properties_t *layout = obs_properties_create();
+	add_xy(layout, "pos_ls_x", "pos_ls_y", "PosLsX", "PosLsY");
+	add_xy(layout, "pos_rs_x", "pos_rs_y", "PosRsX", "PosRsY");
+	add_xy(layout, "pos_face_x", "pos_face_y", "PosFaceX", "PosFaceY");
+	add_xy(layout, "pos_dpad_x", "pos_dpad_y", "PosDpadX", "PosDpadY");
+	add_xy(layout, "pos_gyro_x", "pos_gyro_y", "PosGyroX", "PosGyroY");
+	add_xy(layout, "pos_trig_x", "pos_trig_y", "PosTrigX", "PosTrigY");
+	add_xy(layout, "pos_menu_x", "pos_menu_y", "PosMenuX", "PosMenuY");
+	add_xy(layout, "pos_bump_x", "pos_bump_y", "PosBumpX", "PosBumpY");
+	add_xy(layout, "pos_bars_x", "pos_bars_y", "PosBarsX", "PosBarsY");
+	obs_properties_add_button(layout, "reset_layout", obs_module_text("ResetLayout"), reset_layout_clicked);
+	obs_properties_add_group(props, "layout_group", obs_module_text("LayoutGroup"), OBS_GROUP_NORMAL, layout);
+
 	obs_properties_add_int_slider(props, "rumble_left", obs_module_text("RumbleLeft"), 0, 100, 1);
 	obs_properties_add_int_slider(props, "rumble_right", obs_module_text("RumbleRight"), 0, 100, 1);
 	obs_properties_add_int(props, "rumble_ms", obs_module_text("RumbleDuration"), 50, 3000, 50);
@@ -232,6 +360,8 @@ void source_tick(void *data, float)
 	auto *ctx = static_cast<GamepadSource *>(data);
 	PadSnapshot pad;
 	GamepadDrawSettings settings;
+	StickTrail ls_copy;
+	StickTrail rs_copy;
 	uint32_t w;
 	uint32_t h;
 	{
@@ -240,10 +370,30 @@ void source_tick(void *data, float)
 		h = ctx->height;
 		settings = ctx->draw;
 		pad = gamepad_runtime_snapshot(ctx->slot);
-		if (ctx->have_last && w == ctx->last_w && h == ctx->last_h &&
+		const uint64_t now = now_ms();
+		const bool ls_trail_on = settings.show_trails && settings.show_left_stick;
+		const bool rs_trail_on = settings.show_trails && settings.show_right_stick;
+		if (ls_trail_on) {
+			if (pad.connected)
+				ctx->ls_trail.push(pad.lx_n, pad.ly_n, now);
+			ctx->ls_trail.expire(now, settings.trail_life);
+		} else {
+			ctx->ls_trail.clear();
+		}
+		if (rs_trail_on) {
+			if (pad.connected)
+				ctx->rs_trail.push(pad.rx_n, pad.ry_n, now);
+			ctx->rs_trail.expire(now, settings.trail_life);
+		} else {
+			ctx->rs_trail.clear();
+		}
+		const bool trail_fading = (ls_trail_on && ctx->ls_trail.n >= 2) || (rs_trail_on && ctx->rs_trail.n >= 2);
+		if (ctx->have_last && !trail_fading && w == ctx->last_w && h == ctx->last_h &&
 		    std::memcmp(&pad, &ctx->last_pad, sizeof(pad)) == 0 &&
 		    std::memcmp(&settings, &ctx->last_draw, sizeof(settings)) == 0)
 			return;
+		ls_copy = ctx->ls_trail;
+		rs_copy = ctx->rs_trail;
 		ctx->last_pad = pad;
 		ctx->last_draw = settings;
 		ctx->last_w = w;
@@ -251,7 +401,9 @@ void source_tick(void *data, float)
 		ctx->have_last = true;
 		ctx->pixels.resize((size_t)w * (size_t)h * 4);
 	}
-	gamepad_draw_frame(ctx->pixels.data(), (int)w, (int)h, (int)w * 4, pad, settings);
+	const StickTrail *ls_tr = (settings.show_trails && settings.show_left_stick) ? &ls_copy : nullptr;
+	const StickTrail *rs_tr = (settings.show_trails && settings.show_right_stick) ? &rs_copy : nullptr;
+	gamepad_draw_frame(ctx->pixels.data(), (int)w, (int)h, (int)w * 4, pad, settings, ls_tr, rs_tr);
 	{
 		std::lock_guard<std::mutex> lock(ctx->mutex);
 		ctx->upload.swap(ctx->pixels);

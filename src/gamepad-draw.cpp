@@ -43,6 +43,11 @@ Color argb(BYTE a, BYTE r, BYTE g, BYTE b)
 	return Color(a, r, g, b);
 }
 
+Color obs_color(uint32_t c, BYTE a = 255)
+{
+	return Color(a, (BYTE)(c & 0xFF), (BYTE)((c >> 8) & 0xFF), (BYTE)((c >> 16) & 0xFF));
+}
+
 std::wstring utf16(const char *text)
 {
 	if (!text || !*text)
@@ -162,6 +167,56 @@ void draw_stick(Graphics &g, float cx, float cy, float r, float nx, float ny, fl
 	g.DrawEllipse(&nub_ring, sx - nsz, sy - nsz, nsz * 2, nsz * 2);
 }
 
+void draw_neon_trail(Graphics &g, float cx, float cy, float r, const StickTrail *trail, int max_len, float life_sec,
+		     float thick, const Color &accent)
+{
+	if (!trail || trail->n < 2 || max_len < 2)
+		return;
+	const int use = std::min(trail->n, max_len);
+	const float life = std::max(200.0f, life_sec * 1000.0f);
+	thick = std::clamp(thick, 0.4f, 2.5f);
+	const uint64_t now = trail->now_ms;
+	auto idx_of = [&](int age_from_newest) {
+		return (trail->head + StickTrail::kMax - 1 - age_from_newest) % StickTrail::kMax;
+	};
+	auto pt = [&](int age_from_newest, float &ox, float &oy) {
+		const int idx = idx_of(age_from_newest);
+		ox = cx + std::clamp(trail->x[idx], -1.0f, 1.0f) * r * 0.86f;
+		oy = cy - std::clamp(trail->y[idx], -1.0f, 1.0f) * r * 0.86f;
+	};
+	auto fade_at = [&](int age_from_newest) {
+		const int idx = idx_of(age_from_newest);
+		const float age = (now > trail->t[idx]) ? (float)(now - trail->t[idx]) : 0.0f;
+		const float tf = std::clamp(1.0f - age / life, 0.0f, 1.0f);
+		const float along = 1.0f - (float)age_from_newest / (float)use;
+		return tf * tf * (0.15f + 0.85f * along);
+	};
+	float x1, y1;
+	pt(use - 1, x1, y1);
+	float f1 = fade_at(use - 1);
+	for (int i = use - 2; i >= 0; i--) {
+		float x0, y0;
+		pt(i, x0, y0);
+		const float f0 = fade_at(i);
+		const float fade = std::min(f0, f1);
+		if (fade > 0.02f) {
+			const BYTE a_glow = (BYTE)std::clamp((int)(fade * 130.0f), 0, 140);
+			const BYTE a_core = (BYTE)std::clamp((int)(fade * 255.0f), 0, 255);
+			Pen glow(Color(a_glow, accent.GetR(), accent.GetG(), accent.GetB()),
+				 std::max(2.0f, r * 0.10f * fade * thick));
+			glow.SetLineCap(LineCapRound, LineCapRound, DashCapRound);
+			g.DrawLine(&glow, x1, y1, x0, y0);
+			Pen core(Color(a_core, accent.GetR(), accent.GetG(), accent.GetB()),
+				 std::max(1.2f, r * 0.038f * fade * thick));
+			core.SetLineCap(LineCapRound, LineCapRound, DashCapRound);
+			g.DrawLine(&core, x1, y1, x0, y0);
+		}
+		x1 = x0;
+		y1 = y0;
+		f1 = f0;
+	}
+}
+
 void draw_face_button(Graphics &g, const FontFamily &family, REAL size, float cx, float cy, float r,
 		      const wchar_t *label, bool pressed, Color color)
 {
@@ -186,13 +241,13 @@ void draw_small_button(Graphics &g, const FontFamily &family, REAL size, float c
 		      label);
 }
 
-void draw_dpad(Graphics &g, float cx, float cy, float arm, bool u, bool d, bool l, bool r)
+void draw_dpad(Graphics &g, float cx, float cy, float arm, bool u, bool d, bool l, bool r, const Color &on_c)
 {
 	const float t = arm * 0.42f;
 	auto pad = [&](float x, float y, float w, float h, bool on) {
-		SolidBrush fill(on ? argb(255, 255, 209, 102) : argb(55, 18, 20, 28));
+		SolidBrush fill(on ? on_c : argb(55, 18, 20, 28));
 		fill_round_rect(g, fill, x, y, w, h, 6);
-		Pen outline(on ? argb(255, 255, 255, 255) : argb(160, 180, 188, 200), on ? 2.0f : 1.2f);
+		Pen outline(on ? argb(255, 255, 255, 255) : on_c, on ? 2.0f : 1.2f);
 		stroke_round_rect(g, outline, x, y, w, h, 6);
 	};
 	pad(cx - t * 0.5f, cy - arm, t, arm + t * 0.5f, u);
@@ -292,7 +347,7 @@ void draw_trigger(Graphics &g, float x, float y, float w, float h, float t, bool
 } // namespace
 
 void gamepad_draw_frame(uint8_t *bgra, int width, int height, int stride, const PadSnapshot &pad,
-			const GamepadDrawSettings &settings)
+			const GamepadDrawSettings &settings, const StickTrail *ls_trail, const StickTrail *rs_trail)
 {
 	ensure_gdiplus();
 	if (!bgra || width < 64 || height < 64)
@@ -333,7 +388,25 @@ void gamepad_draw_frame(uint8_t *bgra, int width, int height, int stride, const 
 	const float dpad_cy = rs_cy + rs_r - dpad_arm;
 	const float face_cx = W * 0.80f, face_cy = H * 0.36f + y0, face_r = S * 0.04f, face_spread = S * 0.074f;
 	const float view_cx = W * 0.42f, guide_cx = W * 0.50f, menu_cx = W * 0.58f, menu_cy = H * 0.24f + y0;
-	const float gyro_cx = W * 0.50f, gyro_cy = ls_cy, gyro_r = S * 0.085f;
+	const float gyro_cx = W * 0.50f + settings.pos_gyro_x * W * 0.01f;
+	const float gyro_cy = ls_cy + settings.pos_gyro_y * H * 0.01f;
+	const float gyro_r = S * 0.085f;
+	const float lsx = ls_cx + settings.pos_ls_x * W * 0.01f;
+	const float lsy = ls_cy + settings.pos_ls_y * H * 0.01f;
+	const float rsx = rs_cx + settings.pos_rs_x * W * 0.01f;
+	const float rsy = rs_cy + settings.pos_rs_y * H * 0.01f;
+	const float dpx = dpad_cx + settings.pos_dpad_x * W * 0.01f;
+	const float dpy = dpad_cy + settings.pos_dpad_y * H * 0.01f;
+	const float fcx = face_cx + settings.pos_face_x * W * 0.01f;
+	const float fcy = face_cy + settings.pos_face_y * H * 0.01f;
+	const float tdx = settings.pos_trig_x * W * 0.01f;
+	const float tdy = settings.pos_trig_y * H * 0.01f;
+	const float mdx = settings.pos_menu_x * W * 0.01f;
+	const float mdy = settings.pos_menu_y * H * 0.01f;
+	const float bdx = settings.pos_bump_x * W * 0.01f;
+	const float bdy = settings.pos_bump_y * H * 0.01f;
+	const Color ls_c = obs_color(settings.col_ls);
+	const Color rs_c = obs_color(settings.col_rs);
 
 	if (settings.show_status) {
 		char header[220];
@@ -347,73 +420,81 @@ void gamepad_draw_frame(uint8_t *bgra, int width, int height, int stride, const 
 	}
 
 	if (settings.show_triggers) {
-		draw_trigger(g, lt_x, trig_y, trig_w, trig_h, pad.lt / 255.0f, pad.lt > 30);
-		draw_trigger(g, rt_x, trig_y, trig_w, trig_h, pad.rt / 255.0f, pad.rt > 30);
-		draw_text(g, family, label_sz, text_c, lt_x, trig_y - S * 0.030f, "LT");
-		draw_text(g, family, label_sz, text_c, rt_x, trig_y - S * 0.030f, "RT");
+		draw_trigger(g, lt_x + tdx, trig_y + tdy, trig_w, trig_h, pad.lt / 255.0f, pad.lt > 30);
+		draw_trigger(g, rt_x + tdx, trig_y + tdy, trig_w, trig_h, pad.rt / 255.0f, pad.rt > 30);
+		draw_text(g, family, label_sz, text_c, lt_x + tdx, trig_y + tdy - S * 0.030f, "LT");
+		draw_text(g, family, label_sz, text_c, rt_x + tdx, trig_y + tdy - S * 0.030f, "RT");
 	}
 	if (settings.show_trigger_numbers) {
 		char buf[48];
 		std::snprintf(buf, sizeof(buf), "%u  %.3f", pad.lt, pad.lt / 255.0f);
-		draw_text(g, family, body_sz, text_c, lt_x + trig_w + 10, trig_y - 2, buf);
+		draw_text(g, family, body_sz, text_c, lt_x + tdx + trig_w + 10, trig_y + tdy - 2, buf);
 		std::snprintf(buf, sizeof(buf), "%u  %.3f", pad.rt, pad.rt / 255.0f);
-		draw_text(g, family, body_sz, text_c, rt_x + trig_w + 10, trig_y - 2, buf);
+		draw_text(g, family, body_sz, text_c, rt_x + tdx + trig_w + 10, trig_y + tdy - 2, buf);
 	}
 
 	if (settings.show_bumpers) {
-		draw_small_button(g, family, label_sz, lb_cx, bumper_y, S * 0.16f, S * 0.048f, L"LB", down(pad, 0x0100));
-		draw_small_button(g, family, label_sz, rb_cx, bumper_y, S * 0.16f, S * 0.048f, L"RB", down(pad, 0x0200));
+		draw_small_button(g, family, label_sz, lb_cx + bdx, bumper_y + bdy, S * 0.16f, S * 0.048f, L"LB",
+				  down(pad, 0x0100));
+		draw_small_button(g, family, label_sz, rb_cx + bdx, bumper_y + bdy, S * 0.16f, S * 0.048f, L"RB",
+				  down(pad, 0x0200));
 	}
 
 	if (settings.show_menu_buttons) {
-		draw_small_button(g, family, label_sz, view_cx, menu_cy, S * 0.10f, S * 0.042f, L"Follow",
+		draw_small_button(g, family, label_sz, view_cx + mdx, menu_cy + mdy, S * 0.10f, S * 0.042f, L"Follow",
 				  down(pad, 0x0020));
-		draw_small_button(g, family, label_sz, guide_cx, menu_cy, S * 0.15f, S * 0.048f, L"Machi's",
+		draw_small_button(g, family, label_sz, guide_cx + mdx, menu_cy + mdy, S * 0.15f, S * 0.048f, L"Machi's",
 				  down(pad, 0x0400));
-		draw_small_button(g, family, label_sz, menu_cx, menu_cy, S * 0.09f, S * 0.042f, L"X",
+		draw_small_button(g, family, label_sz, menu_cx + mdx, menu_cy + mdy, S * 0.09f, S * 0.042f, L"X",
 				  down(pad, 0x0010));
 	}
 
 	if (settings.show_left_stick) {
-		draw_stick(g, ls_cx, ls_cy, ls_r, pad.lx_n, pad.ly_n, settings.deadzone, argb(255, 61, 220, 255),
-			   down(pad, 0x0040), pad.connected);
+		if (settings.show_trails)
+			draw_neon_trail(g, lsx, lsy, ls_r, ls_trail, settings.trail_len, settings.trail_life,
+					settings.trail_thick, ls_c);
+		draw_stick(g, lsx, lsy, ls_r, pad.lx_n, pad.ly_n, settings.deadzone, ls_c, down(pad, 0x0040),
+			   pad.connected);
 		if (!settings.show_left_stick_numbers)
-			draw_text(g, family, label_sz, text_c, ls_cx, ls_cy + ls_r + 6, "L", true);
+			draw_text(g, family, label_sz, text_c, lsx, lsy + ls_r + 6, "L", true);
 	}
 	if (settings.show_left_stick_numbers) {
 		char buf[128];
 		std::snprintf(buf, sizeof(buf), "raw X %+6d  Y %+6d\nnorm X %+0.4f  Y %+0.4f", pad.lx, pad.ly, pad.lx_n,
 			      pad.ly_n);
-		draw_text(g, family, body_sz, text_c, ls_cx - ls_r * 0.15f, ls_cy + ls_r + 4, buf);
+		draw_text(g, family, body_sz, text_c, lsx - ls_r * 0.15f, lsy + ls_r + 4, buf);
 	}
 
 	if (settings.show_right_stick) {
-		draw_stick(g, rs_cx, rs_cy, rs_r, pad.rx_n, pad.ry_n, settings.deadzone, argb(255, 255, 106, 213),
-			   down(pad, 0x0080), pad.connected);
+		if (settings.show_trails)
+			draw_neon_trail(g, rsx, rsy, rs_r, rs_trail, settings.trail_len, settings.trail_life,
+					settings.trail_thick, rs_c);
+		draw_stick(g, rsx, rsy, rs_r, pad.rx_n, pad.ry_n, settings.deadzone, rs_c, down(pad, 0x0080),
+			   pad.connected);
 		if (!settings.show_right_stick_numbers)
-			draw_text(g, family, label_sz, text_c, rs_cx, rs_cy + rs_r + 6, "R", true);
+			draw_text(g, family, label_sz, text_c, rsx, rsy + rs_r + 6, "R", true);
 	}
 	if (settings.show_right_stick_numbers) {
 		char buf[128];
 		std::snprintf(buf, sizeof(buf), "raw X %+6d  Y %+6d\nnorm X %+0.4f  Y %+0.4f", pad.rx, pad.ry, pad.rx_n,
 			      pad.ry_n);
-		draw_text(g, family, body_sz, text_c, rs_cx - rs_r * 0.2f, rs_cy - rs_r - body_sz * 2.5f, buf);
+		draw_text(g, family, body_sz, text_c, rsx - rs_r * 0.2f, rsy - rs_r - body_sz * 2.5f, buf);
 	}
 
 	if (settings.show_dpad) {
-		draw_dpad(g, dpad_cx, dpad_cy, dpad_arm, down(pad, 0x0001), down(pad, 0x0002), down(pad, 0x0004),
-			  down(pad, 0x0008));
+		draw_dpad(g, dpx, dpy, dpad_arm, down(pad, 0x0001), down(pad, 0x0002), down(pad, 0x0004),
+			  down(pad, 0x0008), obs_color(settings.col_dpad));
 	}
 
 	if (settings.show_face_buttons) {
-		draw_face_button(g, family, face_sz, face_cx, face_cy - face_spread, face_r, L"Y", down(pad, 0x8000),
-				 argb(255, 232, 197, 71));
-		draw_face_button(g, family, face_sz, face_cx - face_spread, face_cy, face_r, L"X", down(pad, 0x4000),
-				 argb(255, 59, 140, 219));
-		draw_face_button(g, family, face_sz, face_cx + face_spread, face_cy, face_r, L"B", down(pad, 0x2000),
-				 argb(255, 224, 60, 63));
-		draw_face_button(g, family, face_sz, face_cx, face_cy + face_spread, face_r, L"A", down(pad, 0x1000),
-				 argb(255, 124, 187, 63));
+		draw_face_button(g, family, face_sz, fcx, fcy - face_spread, face_r, L"Y", down(pad, 0x8000),
+				 obs_color(settings.col_y));
+		draw_face_button(g, family, face_sz, fcx - face_spread, fcy, face_r, L"X", down(pad, 0x4000),
+				 obs_color(settings.col_x));
+		draw_face_button(g, family, face_sz, fcx + face_spread, fcy, face_r, L"B", down(pad, 0x2000),
+				 obs_color(settings.col_b));
+		draw_face_button(g, family, face_sz, fcx, fcy + face_spread, face_r, L"A", down(pad, 0x1000),
+				 obs_color(settings.col_a));
 	}
 
 	if (settings.show_gyro)
@@ -434,7 +515,8 @@ void gamepad_draw_frame(uint8_t *bgra, int width, int height, int stride, const 
 		const float bar_w = S * 0.026f;
 		const float bar_h = S * 0.16f;
 		const float gap = S * 0.058f;
-		const float y = gyro_cy + gyro_r + S * 0.095f;
+		const float y = gyro_cy + gyro_r + S * 0.095f + settings.pos_bars_y * H * 0.01f;
+		const float bar_dx = settings.pos_bars_x * W * 0.01f;
 		const Color dz_c = argb(210, 61, 220, 255);
 		const Color adz_c = argb(210, 255, 106, 213);
 
@@ -466,7 +548,7 @@ void gamepad_draw_frame(uint8_t *bgra, int width, int height, int stride, const 
 		if (settings.show_jitter_bars)
 			n++;
 		const float group_w = n * bar_w + (n - 1) * gap;
-		draw_group(W * 0.38f - group_w * 0.5f, pad.ls_tune, "L DZ", "L ADZ", "L JIT");
-		draw_group(W * 0.62f - group_w * 0.5f, pad.rs_tune, "R DZ", "R ADZ", "R JIT");
+		draw_group(W * 0.38f - group_w * 0.5f + bar_dx, pad.ls_tune, "L DZ", "L ADZ", "L JIT");
+		draw_group(W * 0.62f - group_w * 0.5f + bar_dx, pad.rs_tune, "R DZ", "R ADZ", "R JIT");
 	}
 }
