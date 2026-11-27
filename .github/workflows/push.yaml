@@ -36,6 +36,8 @@ jobs:
     steps:
       - name: Check Release Tag ☑️
         id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           : Check Release Tag ☑️
           if [[ "${RUNNER_DEBUG}" ]]; then set -x; fi
@@ -55,13 +57,19 @@ jobs:
             *) echo 'validTag=false' >> $GITHUB_OUTPUT ;;
           esac
 
+          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+            echo 'releaseExists=true' >> $GITHUB_OUTPUT
+          else
+            echo 'releaseExists=false' >> $GITHUB_OUTPUT
+          fi
+
       - name: Download Build Artifacts 📥
         uses: actions/download-artifact@v4
-        if: fromJSON(steps.check.outputs.validTag)
+        if: fromJSON(steps.check.outputs.validTag) && steps.check.outputs.releaseExists != 'true'
         id: download
 
       - name: Rename Files 🏷️
-        if: fromJSON(steps.check.outputs.validTag)
+        if: fromJSON(steps.check.outputs.validTag) && steps.check.outputs.releaseExists != 'true'
         run: |
           : Rename Files 🏷️
           if [[ "${RUNNER_DEBUG}" ]]; then set -x; fi
@@ -89,7 +97,7 @@ jobs:
           done
 
       - name: Generate Checksums 🪪
-        if: fromJSON(steps.check.outputs.validTag)
+        if: fromJSON(steps.check.outputs.validTag) && steps.check.outputs.releaseExists != 'true'
         run: |
           : Generate Checksums 🪪
           if [[ "${RUNNER_DEBUG}" ]]; then set -x; fi
@@ -101,11 +109,11 @@ jobs:
           done
 
       - name: Create Release 🛫
-        if: fromJSON(steps.check.outputs.validTag)
+        if: fromJSON(steps.check.outputs.validTag) && steps.check.outputs.releaseExists != 'true'
         id: create_release
         uses: softprops/action-gh-release@9d7c94cfd0a1f3ed45544c887983e9fa900f0564
         with:
-          draft: true
+          draft: false
           prerelease: ${{ fromJSON(steps.check.outputs.prerelease) }}
           tag_name: ${{ steps.check.outputs.version }}
           name: ${{ needs.build-project.outputs.pluginName }} ${{ steps.check.outputs.version }}

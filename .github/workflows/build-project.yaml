@@ -73,6 +73,8 @@ jobs:
 
   macos-build:
     name: Build for macOS 🍏
+    # This plugin is Windows-only. Configuring on macOS stops at a fatal error.
+    if: false
     runs-on: macos-15
     needs: check-event
     defaults:
@@ -177,6 +179,8 @@ jobs:
 
   ubuntu-build:
     name: Build for Ubuntu 🐧
+    # This plugin is Windows-only. Configuring on Linux stops at a fatal error.
+    if: false
     strategy:
       matrix:
         os: [ubuntu-24.04]
@@ -282,6 +286,9 @@ jobs:
         with:
           target: x64
           config: ${{ needs.check-event.outputs.config }}
+
+      - name: Install Inno Setup 📦
+        run: choco install innosetup --no-progress -y
 
       - name: Package Plugin 📀
         uses: ./.github/actions/package-plugin

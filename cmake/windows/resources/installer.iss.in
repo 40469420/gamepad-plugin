@@ -1,0 +1,54 @@
+#define MyAppName "@PLUGIN_DISPLAY_NAME@"
+#define MyAppVersion "@PLUGIN_VERSION@"
+#define MyAppPublisher "@PLUGIN_AUTHOR@"
+#define MyAppURL "https://github.com/40469420/gamepad-plugin"
+
+#ifndef PluginFiles
+#define PluginFiles "Package\gamepad-plugin"
+#endif
+
+[Setup]
+; Stable id so upgrades replace this plugin instead of installing a second copy.
+AppId={{A7C4E2B1-9D58-4F63-B0A4-6E1C8D5F2A37}
+AppName={#MyAppName}
+AppVersion={#MyAppVersion}
+AppVerName={#MyAppName} {#MyAppVersion}
+AppPublisher={#MyAppPublisher}
+AppPublisherURL={#MyAppURL}
+AppSupportURL={#MyAppURL}
+AppUpdatesURL={#MyAppURL}
+VersionInfoVersion={#MyAppVersion}
+VersionInfoCompany={#MyAppPublisher}
+VersionInfoDescription=OBS Studio source that draws a live controller overlay
+VersionInfoProductName={#MyAppName} for OBS Studio
+DefaultDirName={commonappdata}\obs-studio\plugins\gamepad-plugin
+DisableDirPage=yes
+DisableProgramGroupPage=yes
+DirExistsWarning=no
+UsePreviousAppDir=no
+OutputBaseFilename=gamepad-plugin-{#MyAppVersion}-windows-x64-Installer
+OutputDir=.
+Compression=lzma2
+SolidCompression=yes
+WizardStyle=modern
+ArchitecturesAllowed=x64compatible
+ArchitecturesInstallIn64BitMode=x64compatible
+PrivilegesRequired=admin
+MinVersion=10.0
+UninstallDisplayName={#MyAppName} for OBS Studio
+CloseApplications=yes
+CloseApplicationsFilter=obs64.exe
+RestartApplications=no
+
+[Languages]
+Name: "english"; MessagesFile: "compiler:Default.isl"
+
+[Files]
+Source: "{#PluginFiles}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+
+[Messages]
+FinishedHeadingLabel=Gamepad is installed
+FinishedLabel=Fully quit OBS, including the tray icon, then reopen it.%n%nIn a scene, choose Add Source and pick Gamepad.%n%nTools > Plugins is the plugin store. This source does not appear there.
+
+[UninstallDelete]
+Type: filesandordirs; Name: "{app}"

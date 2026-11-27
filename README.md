@@ -4,11 +4,22 @@ OBS source that draws live controller data while a game is using the pad.
 
 It polls **XInput from the OBS process**, so Xbox-compatible controllers keep reporting sticks, buttons, and triggers even when a game has focus. Gyro is read separately through Windows Raw Input (shared, not exclusive).
 
+## Install
+
+Download the Windows installer from the [latest release](https://github.com/40469420/gamepad-plugin/releases/latest).
+
+1. Fully quit OBS, including the tray icon.
+2. Run `gamepad-plugin-<version>-windows-x64-Installer.exe`.
+3. Reopen OBS. In a scene: **Add Source → Gamepad**.
+
+The installer copies the plugin to `C:\ProgramData\obs-studio\plugins\gamepad-plugin`, which is the directory OBS loads on Windows. The release also includes a zip of the same files.
+
 ## Add it in OBS
 
-1. Run `.\install-local.ps1` (copies into `C:\ProgramData\obs-studio\plugins`, which is what OBS 32 on Windows actually loads).
-2. Fully quit OBS — including the tray icon — and reopen it.
-3. In a scene: **Add Source → Gamepad**.
+From a local build, run `.\install-local.ps1` instead of the installer. It copies into `C:\ProgramData\obs-studio\plugins`.
+
+1. Fully quit OBS, including the tray icon, and reopen it.
+2. In a scene: **Add Source → Gamepad**.
 
 `Tools > Plugins` is OBS's plugin store, not a list of loaded sources. This plugin will not appear there.
 
@@ -50,9 +61,9 @@ cmake --build --preset windows-x64
 .\install-local.ps1
 ```
 
-Then restart OBS. The installer copies files to:
+Then restart OBS. `install-local.ps1` copies files to:
 
-`%APPDATA%\obs-studio\plugins\gamepad-plugin\`
+`C:\ProgramData\obs-studio\plugins\gamepad-plugin\`
 
 ## Controls
 
